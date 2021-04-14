@@ -171,6 +171,7 @@ NSArray * AFQueryStringPairsFromKeyAndValue(NSString *key, id value) {
 
 #pragma mark -
 
+//给属性添加监听。
 static NSArray * AFHTTPRequestSerializerObservedKeyPaths() {
     static NSArray *_AFHTTPRequestSerializerObservedKeyPaths = nil;
     static dispatch_once_t onceToken;
@@ -206,19 +207,23 @@ static void *AFHTTPRequestSerializerObserverContext = &AFHTTPRequestSerializerOb
     self.stringEncoding = NSUTF8StringEncoding;
 
     self.mutableHTTPRequestHeaders = [NSMutableDictionary dictionary];
+    //并发队列
     self.requestHeaderModificationQueue = dispatch_queue_create("requestHeaderModificationQueue", DISPATCH_QUEUE_CONCURRENT);
 
     // Accept-Language HTTP Header; see http://www.w3.org/Protocols/rfc2616/rfc2616-sec14.html#sec14.4
     NSMutableArray *acceptLanguagesComponents = [NSMutableArray array];
+    //设置头部Accept-Language：根据的是preferredLanguages越靠前的权重越高
     [[NSLocale preferredLanguages] enumerateObjectsUsingBlock:^(id obj, NSUInteger idx, BOOL *stop) {
         float q = 1.0f - (idx * 0.1f);
         [acceptLanguagesComponents addObject:[NSString stringWithFormat:@"%@;q=%0.1g", obj, q]];
         *stop = q <= 0.5f;
     }];
+    // Accept-Language: da, en-gb;q=0.8, en;q=0.7
     [self setValue:[acceptLanguagesComponents componentsJoinedByString:@", "] forHTTPHeaderField:@"Accept-Language"];
 
     // User-Agent Header; see http://www.w3.org/Protocols/rfc2616/rfc2616-sec14.html#sec14.43
     NSString *userAgent = nil;
+    //这里设置userAgent： (kCFBundleExecutableKey or kCFBundleIdentifierKey)/(version) (型号;iOS 系统版本;Scale/缩放比例)
 #if TARGET_OS_IOS
     userAgent = [NSString stringWithFormat:@"%@/%@ (%@; iOS %@; Scale/%0.2f)", [[NSBundle mainBundle] infoDictionary][(__bridge NSString *)kCFBundleExecutableKey] ?: [[NSBundle mainBundle] infoDictionary][(__bridge NSString *)kCFBundleIdentifierKey], [[NSBundle mainBundle] infoDictionary][@"CFBundleShortVersionString"] ?: [[NSBundle mainBundle] infoDictionary][(__bridge NSString *)kCFBundleVersionKey], [[UIDevice currentDevice] model], [[UIDevice currentDevice] systemVersion], [[UIScreen mainScreen] scale]];
 #elif TARGET_OS_TV
@@ -239,9 +244,11 @@ static void *AFHTTPRequestSerializerObserverContext = &AFHTTPRequestSerializerOb
     }
 
     // HTTP Method Definitions; see http://www.w3.org/Protocols/rfc2616/rfc2616-sec9.html
+    //需要把参数组装到uri的方法名
     self.HTTPMethodsEncodingParametersInURI = [NSSet setWithObjects:@"GET", @"HEAD", @"DELETE", nil];
-
+    
     self.mutableObservedChangedKeyPaths = [NSMutableSet set];
+    //给AFHTTPRequestSerializerObservedKeyPaths 属性添加监听。
     for (NSString *keyPath in AFHTTPRequestSerializerObservedKeyPaths()) {
         if ([self respondsToSelector:NSSelectorFromString(keyPath)]) {
             [self addObserver:self forKeyPath:keyPath options:NSKeyValueObservingOptionNew context:AFHTTPRequestSerializerObserverContext];
@@ -264,6 +271,8 @@ static void *AFHTTPRequestSerializerObserverContext = &AFHTTPRequestSerializerOb
 // Workarounds for crashing behavior using Key-Value Observing with XCTest
 // See https://github.com/AFNetworking/AFNetworking/issues/2523
 
+//这里改成了自己处理，用automaticallyNotifiesObserversForKey 把KVO的自动处理关闭了。
+//改为手动实现的原因是上面的issue，在单元测试的时候，KVO会导致崩溃。所以这里改成了手动实现。
 - (void)setAllowsCellularAccess:(BOOL)allowsCellularAccess {
     [self willChangeValueForKey:NSStringFromSelector(@selector(allowsCellularAccess))];
     _allowsCellularAccess = allowsCellularAccess;
@@ -313,6 +322,11 @@ static void *AFHTTPRequestSerializerObserverContext = &AFHTTPRequestSerializerOb
 - (void)setValue:(NSString *)value
 forHTTPHeaderField:(NSString *)field
 {
+    //线程同步方案。
+    //用到了dispatch_barrier_sync，跟async不同，这个方法不执行完block都不返回。
+    //不要用串行队列和全局并发队列，效果会跟dispatch_sync一样，在当前队列使用绝对死锁。
+    //这里必须要用自己创建的并发队列
+    //写就要一个个写，barrier的block执行的时候，所有的读操作都会被隔离。等待写结束再继续操作。
     dispatch_barrier_sync(self.requestHeaderModificationQueue, ^{
         [self.mutableHTTPRequestHeaders setValue:value forKey:field];
     });
@@ -320,6 +334,7 @@ forHTTPHeaderField:(NSString *)field
 
 - (NSString *)valueForHTTPHeaderField:(NSString *)field {
     NSString __block *value;
+    //读无所谓，可以多读。
     dispatch_sync(self.requestHeaderModificationQueue, ^{
         value = [self.mutableHTTPRequestHeaders valueForKey:field];
     });
@@ -368,10 +383,11 @@ forHTTPHeaderField:(NSString *)field
     NSMutableURLRequest *mutableRequest = [[NSMutableURLRequest alloc] initWithURL:url];
     mutableRequest.HTTPMethod = method;
 
+    //AFUrl里面取的名字跟NSMutableURLRequest一样，所以直接用就可以。
     for (NSString *keyPath in self.mutableObservedChangedKeyPaths) {
         [mutableRequest setValue:[self valueForKeyPath:keyPath] forKey:keyPath];
     }
-
+    //AFHttpRequestSerialization是 实现AFUrl...的接口，这个AFUrl...是一个虚拟类。整个文件就是一个类簇。
     mutableRequest = [[self requestBySerializingRequest:mutableRequest withParameters:parameters error:error] mutableCopy];
 
 	return mutableRequest;
@@ -469,15 +485,15 @@ forHTTPHeaderField:(NSString *)field
 }
 
 #pragma mark - AFURLRequestSerialization
-
+//组装request，包括header， parameters
 - (NSURLRequest *)requestBySerializingRequest:(NSURLRequest *)request
                                withParameters:(id)parameters
                                         error:(NSError *__autoreleasing *)error
 {
     NSParameterAssert(request);
-
+    //深拷贝。 里面修改不影响外面。
     NSMutableURLRequest *mutableRequest = [request mutableCopy];
-
+    //把header的东西放进去
     [self.HTTPRequestHeaders enumerateKeysAndObjectsUsingBlock:^(id field, id value, BOOL * __unused stop) {
         if (![request valueForHTTPHeaderField:field]) {
             [mutableRequest setValue:value forHTTPHeaderField:field];
@@ -485,6 +501,7 @@ forHTTPHeaderField:(NSString *)field
     }];
 
     NSString *query = nil;
+    //拼接参数字符串
     if (parameters) {
         if (self.queryStringSerialization) {
             NSError *serializationError;
@@ -507,6 +524,7 @@ forHTTPHeaderField:(NSString *)field
     }
 
     if ([self.HTTPMethodsEncodingParametersInURI containsObject:[[request HTTPMethod] uppercaseString]]) {
+        //如果是head get delete 就直接拼接到request url上。
         if (query && query.length > 0) {
             mutableRequest.URL = [NSURL URLWithString:[[mutableRequest.URL absoluteString] stringByAppendingFormat:mutableRequest.URL.query ? @"&%@" : @"?%@", query]];
         }
@@ -515,6 +533,7 @@ forHTTPHeaderField:(NSString *)field
         if (!query) {
             query = @"";
         }
+        //如果是post这样的， 就是放到body里面
         if (![mutableRequest valueForHTTPHeaderField:@"Content-Type"]) {
             [mutableRequest setValue:@"application/x-www-form-urlencoded" forHTTPHeaderField:@"Content-Type"];
         }
@@ -526,6 +545,7 @@ forHTTPHeaderField:(NSString *)field
 
 #pragma mark - NSKeyValueObserving
 
+//这里直接把KVO的监听给关掉了
 + (BOOL)automaticallyNotifiesObserversForKey:(NSString *)key {
     if ([AFHTTPRequestSerializerObservedKeyPaths() containsObject:key]) {
         return NO;

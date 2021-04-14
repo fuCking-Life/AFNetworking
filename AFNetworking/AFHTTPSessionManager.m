@@ -66,6 +66,7 @@
 - (instancetype)initWithBaseURL:(NSURL *)url
            sessionConfiguration:(NSURLSessionConfiguration *)configuration
 {
+    //根据config初始化 sessionmanager 这里先不管
     self = [super initWithSessionConfiguration:configuration];
     if (!self) {
         return nil;
@@ -77,8 +78,9 @@
     }
 
     self.baseURL = url;
-
+    //1. 创建请求序列化
     self.requestSerializer = [AFHTTPRequestSerializer serializer];
+    //2. 创建应答序列化
     self.responseSerializer = [AFJSONResponseSerializer serializer];
 
     return self;
@@ -133,7 +135,7 @@
                                                  downloadProgress:downloadProgress
                                                           success:success
                                                           failure:failure];
-    
+    //开始请求
     [dataTask resume];
     
     return dataTask;
@@ -248,7 +250,7 @@
     return dataTask;
 }
 
-
+//正常的网络请求
 - (NSURLSessionDataTask *)dataTaskWithHTTPMethod:(NSString *)method
                                        URLString:(NSString *)URLString
                                       parameters:(nullable id)parameters
@@ -258,8 +260,11 @@
                                          success:(nullable void (^)(NSURLSessionDataTask *task, id _Nullable responseObject))success
                                          failure:(nullable void (^)(NSURLSessionDataTask * _Nullable task, NSError *error))failure
 {
+    //请求序列化的错误标识
     NSError *serializationError = nil;
+    //生成一个request，里面做了很多操作。
     NSMutableURLRequest *request = [self.requestSerializer requestWithMethod:method URLString:[[NSURL URLWithString:URLString relativeToURL:self.baseURL] absoluteString] parameters:parameters error:&serializationError];
+    //需要额外添加的header 参数，
     for (NSString *headerField in headers.keyEnumerator) {
         [request setValue:headers[headerField] forHTTPHeaderField:headerField];
     }
@@ -274,6 +279,7 @@
     }
 
     __block NSURLSessionDataTask *dataTask = nil;
+    //这里的实现就直接去了super实现了，因为这个类没有实现这个方法。
     dataTask = [self dataTaskWithRequest:request
                           uploadProgress:uploadProgress
                         downloadProgress:downloadProgress

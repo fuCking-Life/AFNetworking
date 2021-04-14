@@ -483,16 +483,18 @@ static NSString * const AFNSURLSessionTaskDidSuspendNotification = @"com.alamofi
     if (!self) {
         return nil;
     }
-
+    //没有config 就默认使用NSURLSessionConfiguration
     if (!configuration) {
         configuration = [NSURLSessionConfiguration defaultSessionConfiguration];
     }
 
     self.sessionConfiguration = configuration;
 
+    //操作队列
     self.operationQueue = [[NSOperationQueue alloc] init];
+    //最大并发数量
     self.operationQueue.maxConcurrentOperationCount = 1;
-
+    //响应解析
     self.responseSerializer = [AFJSONResponseSerializer serializer];
 
     self.securityPolicy = [AFSecurityPolicy defaultPolicy];
@@ -502,10 +504,10 @@ static NSString * const AFNSURLSessionTaskDidSuspendNotification = @"com.alamofi
 #endif
 
     self.mutableTaskDelegatesKeyedByTaskIdentifier = [[NSMutableDictionary alloc] init];
-
+    //nslock是对pthread_mutex_t的封装
     self.lock = [[NSLock alloc] init];
     self.lock.name = AFURLSessionManagerLockName;
-
+    
     [self.session getTasksWithCompletionHandler:^(NSArray *dataTasks, NSArray *uploadTasks, NSArray *downloadTasks) {
         for (NSURLSessionDataTask *task in dataTasks) {
             [self addDelegateForDataTask:task uploadProgress:nil downloadProgress:nil completionHandler:nil];
@@ -588,6 +590,7 @@ static NSString * const AFNSURLSessionTaskDidSuspendNotification = @"com.alamofi
     NSParameterAssert(delegate);
 
     [self.lock lock];
+    //dict存储delegate和 task的映射
     self.mutableTaskDelegatesKeyedByTaskIdentifier[@(task.taskIdentifier)] = delegate;
     [self addNotificationObserverForTask:task];
     [self.lock unlock];
@@ -598,6 +601,7 @@ static NSString * const AFNSURLSessionTaskDidSuspendNotification = @"com.alamofi
               downloadProgress:(nullable void (^)(NSProgress *downloadProgress)) downloadProgressBlock
              completionHandler:(void (^)(NSURLResponse *response, id responseObject, NSError *error))completionHandler
 {
+    //配置回调。一个datatask 绑定一个回调。
     AFURLSessionManagerTaskDelegate *delegate = [[AFURLSessionManagerTaskDelegate alloc] initWithTask:dataTask];
     delegate.manager = self;
     delegate.completionHandler = completionHandler;
@@ -733,9 +737,9 @@ static NSString * const AFNSURLSessionTaskDidSuspendNotification = @"com.alamofi
                                uploadProgress:(nullable void (^)(NSProgress *uploadProgress)) uploadProgressBlock
                              downloadProgress:(nullable void (^)(NSProgress *downloadProgress)) downloadProgressBlock
                             completionHandler:(nullable void (^)(NSURLResponse *response, id _Nullable responseObject,  NSError * _Nullable error))completionHandler {
-
+    //创建data task
     NSURLSessionDataTask *dataTask = [self.session dataTaskWithRequest:request];
-
+    //配置delegate等内容
     [self addDelegateForDataTask:dataTask uploadProgress:uploadProgressBlock downloadProgress:downloadProgressBlock completionHandler:completionHandler];
 
     return dataTask;

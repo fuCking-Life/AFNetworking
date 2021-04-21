@@ -72,6 +72,7 @@ NSString * const kUserProfileImageDidLoadNotification = @"com.alamofire.user.pro
 //}
 
 - (NSImage *)profileImage {
+    
     return nil;
 //	if (!_profileImage && !_avatarImageRequestOperation) {
 //        NSMutableURLRequest *mutableRequest = [NSMutableURLRequest requestWithURL:self.avatarImageURL];
@@ -91,10 +92,10 @@ NSString * const kUserProfileImageDidLoadNotification = @"com.alamofire.user.pro
 //		}];
 //
 //		_avatarImageRequestOperation = imageRequestOperation;
-//		
+//
 //        [[[self class] sharedProfileImageRequestOperationQueue] addOperation:_avatarImageRequestOperation];
 //	}
-//	
+//
 //	return _profileImage;
 }
 

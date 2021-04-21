@@ -46,7 +46,7 @@
 + (NSURLSessionDataTask *)globalTimelinePostsWithBlock:(void (^)(NSArray *posts, NSError *error))block {
     //发送请求
     
-//    [AFAppDotNetAPIClient sharedClient]uploadTaskWithStreamedRequest:nil progress:nil completionHandler:nil];
+    [[AFAppDotNetAPIClient sharedClient]uploadTaskWithRequest:nil fromFile:nil progress:nil completionHandler:nil];
     
     return [[AFAppDotNetAPIClient sharedClient] GET:@"stream/0/posts/stream/global" parameters:nil headers: nil progress:nil success:^(NSURLSessionDataTask * __unused task, id JSON) {
         NSArray *postsFromResponse = [JSON valueForKeyPath:@"data"];

@@ -83,6 +83,7 @@
         self.cachedImages = [[NSMutableDictionary alloc] init];
 
         NSString *queueName = [NSString stringWithFormat:@"com.alamofire.autopurgingimagecache-%@", [[NSUUID UUID] UUIDString]];
+        //并发队列
         self.synchronizationQueue = dispatch_queue_create([queueName cStringUsingEncoding:NSASCIIStringEncoding], DISPATCH_QUEUE_CONCURRENT);
 
         [[NSNotificationCenter defaultCenter]
@@ -106,11 +107,11 @@
     });
     return result;
 }
-
+//缓存
 - (void)addImage:(UIImage *)image withIdentifier:(NSString *)identifier {
+    //1. 如果identifier存在image，就更换image
     dispatch_barrier_async(self.synchronizationQueue, ^{
         AFCachedImage *cacheImage = [[AFCachedImage alloc] initWithImage:image identifier:identifier];
-
         AFCachedImage *previousCachedImage = self.cachedImages[identifier];
         if (previousCachedImage != nil) {
             self.currentMemoryUsage -= previousCachedImage.totalBytes;
@@ -119,7 +120,8 @@
         self.cachedImages[identifier] = cacheImage;
         self.currentMemoryUsage += cacheImage.totalBytes;
     });
-
+    //2. 如果超过自定义的内存容量，就开始清理，清理的过程中按照lastAccessDate做升序排列，最近没有被用到的都是靠前的。
+    //就开始删除 缓存，直到删除到不超过内存限制为止。
     dispatch_barrier_async(self.synchronizationQueue, ^{
         if (self.currentMemoryUsage > self.memoryCapacity) {
             UInt64 bytesToPurge = self.currentMemoryUsage - self.preferredMemoryUsageAfterPurge;

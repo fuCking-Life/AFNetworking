@@ -83,13 +83,13 @@
         }
         return;
     }
-    
+    //当前下载的地址和将要下载的地址相同，就直接返回。
     if ([self isActiveTaskURLEqualToURLRequest:urlRequest]) {
         return;
     }
     
     [self cancelImageDownloadTask];
-
+    
     AFImageDownloader *downloader = [[self class] sharedImageDownloader];
     id <AFImageRequestCache> imageCache = downloader.imageCache;
 
@@ -108,6 +108,7 @@
         }
 
         __weak __typeof(self)weakSelf = self;
+        //生成128位的随机序列
         NSUUID *downloadID = [NSUUID UUID];
         AFImageDownloadReceipt *receipt;
         receipt = [downloader
@@ -134,7 +135,7 @@
                             [strongSelf clearActiveDownloadInformation];
                         }
                    }];
-
+        //让receiver 保留receipt。也就是保存一下这个下载的存根。方便以后取消下载和查看下载的路径是否重复。
         self.af_activeImageDownloadReceipt = receipt;
     }
 }

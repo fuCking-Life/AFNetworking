@@ -144,7 +144,7 @@
 
     return configuration;
 }
-
+//downloader 初始化
 - (instancetype)init {
     NSURLSessionConfiguration *defaultConfiguration = [self.class defaultURLSessionConfiguration];
     return [self initWithSessionConfiguration:defaultConfiguration];
@@ -152,8 +152,9 @@
 
 - (instancetype)initWithSessionConfiguration:(NSURLSessionConfiguration *)configuration {
     AFHTTPSessionManager *sessionManager = [[AFHTTPSessionManager alloc] initWithSessionConfiguration:configuration];
+    //AFImageResponseSerializer
     sessionManager.responseSerializer = [AFImageResponseSerializer serializer];
-
+    //初始化sessionmanager，配置下载优先级策略，最大下载个数，缓存策略。
     return [self initWithSessionManager:sessionManager
                  downloadPrioritization:AFImageDownloadPrioritizationFIFO
                  maximumActiveDownloads:4
@@ -170,15 +171,18 @@
         self.downloadPrioritization = downloadPrioritization;
         self.maximumActiveDownloads = maximumActiveDownloads;
         self.imageCache = imageCache;
-
+        // mergetask 队列
         self.queuedMergedTasks = [[NSMutableArray alloc] init];
+        // mergetask的字典
         self.mergedTasks = [[NSMutableDictionary alloc] init];
+        // 正在请求的链接数量
         self.activeRequestCount = 0;
-
         NSString *name = [NSString stringWithFormat:@"com.alamofire.imagedownloader.synchronizationqueue-%@", [[NSUUID UUID] UUIDString]];
+        //同步队列 串行队列
         self.synchronizationQueue = dispatch_queue_create([name cStringUsingEncoding:NSASCIIStringEncoding], DISPATCH_QUEUE_SERIAL);
 
         name = [NSString stringWithFormat:@"com.alamofire.imagedownloader.responsequeue-%@", [[NSUUID UUID] UUIDString]];
+        //响应队列，并发队列
         self.responseQueue = dispatch_queue_create([name cStringUsingEncoding:NSASCIIStringEncoding], DISPATCH_QUEUE_CONCURRENT);
     }
 
@@ -205,6 +209,10 @@
                                                         success:(nullable void (^)(NSURLRequest *request, NSHTTPURLResponse  * _Nullable response, UIImage *responseObject))success
                                                         failure:(nullable void (^)(NSURLRequest *request, NSHTTPURLResponse * _Nullable response, NSError *error))failure {
     __block NSURLSessionDataTask *task = nil;
+    // 这里为什么使用sync？？为什么synchronizationQueue是串行队列？
+    // 首先明确一点这里不会死锁。因为和主队列是两个队列。
+    // 其次imagedownloader是一个单例，有很多的下载任务都是交到了这里，所以需要一个串行队列来维护下载顺序。
+    // 而且还需要返回receipt给receiver，所以不可以使用async，async是直接返回的。 receipt还没有生成。
     dispatch_sync(self.synchronizationQueue, ^{
         NSString *URLIdentifier = request.URL.absoluteString;
         if (URLIdentifier == nil) {
@@ -227,6 +235,7 @@
         }
 
         // 2) Attempt to load the image from the image cache if the cache policy allows it
+#warning -- 为什么再查一次？ 前面已经查过一次了。
         switch (request.cachePolicy) {
             case NSURLRequestUseProtocolCachePolicy:
             case NSURLRequestReturnCacheDataElseLoad:
@@ -256,6 +265,7 @@
                        uploadProgress:nil
                        downloadProgress:nil
                        completionHandler:^(NSURLResponse * _Nonnull response, id  _Nullable responseObject, NSError * _Nullable error) {
+                            //用了异步线程 并发队列，提高处理速度
                            dispatch_async(self.responseQueue, ^{
                                __strong __typeof__(weakSelf) strongSelf = weakSelf;
                                AFImageDownloaderMergedTask *mergedTask = [strongSelf safelyGetMergedTask:URLIdentifier];
@@ -271,6 +281,7 @@
                                        }
                                    } else {
                                        if ([strongSelf.imageCache shouldCacheImage:responseObject forRequest:request withAdditionalIdentifier:nil]) {
+                                           //添加缓存
                                            [strongSelf.imageCache addImage:responseObject forRequest:request withAdditionalIdentifier:nil];
                                        }
 
@@ -290,20 +301,27 @@
                        }];
 
         // 4) Store the response handler for use when the request completes
+        //AFImageDownloaderResponseHandler 把UUID 成功和失败的回调都放到了一起。方便通过UUID直接取出对应的回调。
         AFImageDownloaderResponseHandler *handler = [[AFImageDownloaderResponseHandler alloc] initWithUUID:receiptID
                                                                                                    success:success
                                                                                                    failure:failure];
+        //AFImageDownloaderMergedTask 组合的task，将datatask等东西都放到了一起，生成了一个组合的task
         AFImageDownloaderMergedTask *mergedTask = [[AFImageDownloaderMergedTask alloc]
                                                    initWithURLIdentifier:URLIdentifier
                                                    identifier:mergedTaskIdentifier
                                                    task:createdTask];
         [mergedTask addResponseHandler:handler];
+        //将mergedTask放到一个字典中。方便取出
         self.mergedTasks[URLIdentifier] = mergedTask;
 
         // 5) Either start the request or enqueue it depending on the current active request count
+        //开始还是入队取决于当前的数量请求数量
         if ([self isActiveRequestCountBelowMaximumLimit]) {
+            //如果请求数量小于最大限制的数量，就直接开始执行task
             [self startMergedTask:mergedTask];
         } else {
+            //如果请求数量大于最大限制的数量，就入队，入队遵循 FIFO 或者LIFO原则。可以选择。
+            //本质上来说就是执行的优先级
             [self enqueueMergedTask:mergedTask];
         }
 

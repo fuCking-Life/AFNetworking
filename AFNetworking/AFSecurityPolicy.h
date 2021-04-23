@@ -19,6 +19,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
+
+// https://www.jianshu.com/p/2c5c8bc55f54
 #import <Foundation/Foundation.h>
 #import <Security/Security.h>
 
